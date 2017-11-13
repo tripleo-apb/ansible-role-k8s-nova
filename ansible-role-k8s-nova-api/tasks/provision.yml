@@ -1,0 +1,147 @@
+- include: hiera.yml
+
+- name: Generate config files
+  config_template:
+    src: nova.conf.j2
+    dest: /tmp/nova.conf
+    config_overrides: '{{nova_config}}'
+    config_type: ini
+
+- name: Read configs into memory
+  slurp:
+    src: "/tmp/nova.conf"
+  register: "nova_conf"
+
+- name: Create nova-api configmaps
+  ignore_errors: yes
+  k8s_v1_config_map:
+    name: "{{name}}"
+    host: "{{coe_host}}"
+    context: "{{kube_context}}"
+    kubeconfig: "{{config_file}}"
+    namespace: "{{namespace}}"
+    state: present
+    debug: yes
+    labels:
+      service: "{{name}}"
+    data:
+      config.json: |
+        {
+            "command": "nova-api",
+            "config_files": [
+                {
+                    "source": "/var/lib/kolla/config_files/nova.conf",
+                    "dest": "/etc/nova/nova.conf",
+                    "owner": "nova",
+                    "perm": "0600"
+                },
+                {
+                    "source": "/var/lib/kolla/config_files/policy.json",
+                    "dest": "/etc/nova/policy.json",
+                    "owner": "nova",
+                    "perm": "0600",
+                    "optional": true
+                }
+            ],
+            "permissions": [
+                {
+                    "path": "/var/log/kolla/nova",
+                    "owner": "nova:nova",
+                    "recurse": true
+                }
+            ]
+        }
+
+      nova.conf: |
+        {{nova_conf['content'] | b64decode}}
+
+- name: create nova-api service
+  k8s_v1_service:
+    name: nova-api
+    host: "{{coe_host}}"
+    context: "{{kube_context}}"
+    kubeconfig: "{{config_file}}"
+    namespace: "{{ namespace }}"
+    labels:
+      app: nova-api
+      service: nova-api
+    selector:
+      app: nova-api
+      service: nova-api
+    ports:
+      - name: nova-api
+        port: 8774
+        target_port: 8774
+
+- name: create nova-metadata service
+  k8s_v1_service:
+    name: nova-metadata
+    host: "{{coe_host}}"
+    context: "{{kube_context}}"
+    kubeconfig: "{{config_file}}"
+    namespace: "{{ namespace }}"
+    labels:
+      app: nova-api
+      service: nova-api
+    selector:
+      app: nova-api
+      service: nova-api
+    ports:
+      - name: nova-metadata
+        port: 8775
+        target_port: 8775
+
+- name: Create nova-api database
+  include_role:
+    name: ansible-role-k8s-tripleo
+    tasks_from: create-database
+  vars:
+    service_name: 'nova-api'
+    database_name: 'nova_api'
+
+- name: Create nova deployment
+  k8s_v1beta1_deployment:
+    name: "{{name}}"
+    host: "{{coe_host}}"
+    context: "{{kube_context}}"
+    kubeconfig: "{{config_file}}"
+    namespace: "{{namespace}}"
+    service_account_name: '{{ service_account_name }}'
+    replicas: 1
+    node_selector:
+      controller: "true"
+    spec_revision_history_limit: 3
+    spec_template_metadata_labels:
+      app: "{{name}}"
+      service: "{{name}}"
+    containers:
+      - name: "{{name}}"
+        # Privileged SCC
+        securityContext:
+          privileged: true
+        image: tripleoupstream/centos-binary-nova-api
+        imagePullPolicy: IfNotPresent
+        ports:
+          - container_port: 8774
+            protocol: TCP
+        env:
+        - name: KOLLA_CONFIG_STRATEGY
+          value: COPY_ALWAYS
+        - name: KOLLA_KUBERNETES
+          value: ""
+        volume_mounts:
+        - name: kolla-config
+          mountPath: /var/lib/kolla/config_files/
+        - name: lib-modules
+          mountPath: /lib/modules
+    volumes:
+      - name: kolla-config
+        config_map:
+          name: "{{name}}"
+      - name: lib-modules
+        hostPath:
+          path: /lib/modules
+    state: present
+
+- include: keystone.yml
+

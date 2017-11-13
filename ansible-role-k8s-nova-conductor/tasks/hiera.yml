@@ -1,0 +1,54 @@
+- name: Translate hieradata
+  include_role:
+    name: 'ansible-role-k8s-tripleo'
+  vars:
+    schema:
+        nova::api::api_bind_address: osapi_compute_listen
+        nova::api::default_floating_pool: default_floating_pool
+        nova::api::enable_proxy_headers_parsing: oslo_middleware.enable_proxy_headers_parsing
+        nova::api::metadata_listen: metadata_listen
+        nova::api::metadata_workers: metadata_workers
+        nova::api::neutron_metadata_proxy_shared_secret: neutron.metadata_proxy_shared_secret
+        nova::api::osapi_compute_workers: osapi_compute_workers
+        nova::api_database_connection: api_database.connection
+
+        nova::cinder_catalog_info: volumev2:cinderv2:internalURL
+        nova::database_connection: database.connection
+        nova::db::database_db_max_retries: database.db_max_retries
+        nova::db::database_max_retries: database.max_retries
+
+        nova::glance_api_servers: glance.api_servers
+
+        nova::keystone::auth::tenant: keystone_tenant
+        nova::keystone::auth::public_url: keystone_public_url
+        nova::keystone::auth::internal_url: keystone_internal_url
+        nova::keystone::auth::admin_url: keystone_admin_url
+        nova::keystone::auth::password: keystone_user_password
+        nova::keystone::auth::region: keystone_region
+
+        nova::keystone::authtoken::auth_uri: keystone_authtoken.auth_uri
+        nova::keystone::authtoken::auth_url: keystone_authtoken.auth_url
+        nova::keystone::authtoken::username: keystone_authtoken.username
+        nova::keystone::authtoken::password: keystone_authtoken.password
+        nova::keystone::authtoken::project_name: keystone_authtoken.project_name
+        nova::network::neutron::dhcp_domain:  neutron.dhcp_domain
+        nova::network::neutron::neutron_auth_type: neutron.auth_type
+        nova::network::neutron::neutron_auth_url: neutron.neutron_auth_url
+        nova::network::neutron::neutron_ovs_bridge: neutron.ovs_bridge
+        nova::network::neutron::neutron_password: neutron.neutron_auth_type
+        nova::network::neutron::neutron_project_name: neutron.neutron_auth_type
+        nova::network::neutron::neutron_url: neutron.neutron_auth_type
+        nova::network::neutron::neutron_username: neutron.neutron_auth_type
+
+        nova::rabbit_password: oslo_messaging_rabbit.rabbit_password
+        nova::rabbit_userid: oslo_messaging_rabbit.rabbit_userid
+        nova::rabbit_use_ssl: oslo_messaging_rabbit.rabbit_use_ssl
+        nova::rabbit_port: oslo_messaging_rabbit.rabbit_port
+
+        # NOTE(flaper87): Required for registering the keystone endpoint
+        keystone_region: keystone_region
+        keystone_default_domain: keystone_default_domain
+
+    default: '{{nova_config}}'
+    fact_variable: 'nova_config'
+

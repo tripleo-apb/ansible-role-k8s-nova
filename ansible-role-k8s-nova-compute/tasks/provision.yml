@@ -1,0 +1,188 @@
+- include: hiera.yml
+
+- name: Generate config files
+  config_template:
+    src: nova.conf.j2
+    dest: /tmp/nova.conf
+    config_overrides: '{{nova_config}}'
+    config_type: ini
+
+- name: Read configs into memory
+  slurp:
+    src: "/tmp/nova.conf"
+  register: "nova_conf"
+
+- name: Create nova-compute configmaps
+  ignore_errors: yes
+  k8s_v1_config_map:
+    name: "{{name}}"
+    host: "{{coe_host}}"
+    context: "{{kube_context}}"
+    kubeconfig: "{{config_file}}"
+    namespace: "{{namespace}}"
+    state: present
+    debug: yes
+    labels:
+      service: "{{name}}"
+    data:
+      config.json: |
+        {
+            "command": "nova-compute",
+            "config_files": [
+                {
+                    "source": "/var/lib/kolla/config_files/nova.conf",
+                    "dest": "/etc/nova/nova.conf",
+                    "owner": "nova",
+                    "perm": "0600"
+                },
+                {
+                    "source": "/var/lib/kolla/config_files/policy.json",
+                    "dest": "/etc/nova/policy.json",
+                    "owner": "nova",
+                    "perm": "0600",
+                    "optional": true
+                }    ],
+            "permissions": [
+                {
+                    "path": "/var/log/kolla/nova",
+                    "owner": "nova:nova",
+                    "recurse": true
+                },
+                {
+                    "path": "/var/lib/nova",
+                    "owner": "nova:nova",
+                    "recurse": true
+                }
+            ]
+        }
+
+      nova.conf: |
+        {{nova_conf['content'] | b64decode}}
+
+- name: Init nova.conf
+  k8s_v1_job:
+    name: "init-nova-conf"
+    host: "{{coe_host}}"
+    context: "{{kube_context}}"
+    kubeconfig: "{{config_file}}"
+    namespace: "{{ namespace }}"
+    service_account_name: "{{ service_account_name }}"
+    restart_policy: OnFailure
+    containers:
+      - name: nova-conf-init
+        image: tripleoupstream/centos-binary-kolla-toolbox:latest
+        image_pull_policy: IfNotPresent
+        command: ["sh", "-c"]
+        args:
+          - "IP=$(ip addr show dev eth0 | grep -G inet | grep -v inet6 | awk '{print $2}' | sed 's@/.*@@');
+            crudini --set /var/lib/kolla/config_files/nova.conf DEFAULT my_ip $IP"
+        volume_mounts:
+          - name: kolla-config
+            mountPath: /var/lib/kolla/config_files/
+        env:
+          - name: "TZ"
+            value: "UTC"
+    volumes:
+      - name: kolla-config
+        config_map:
+          name: "{{name}}"
+
+- name: Init nova dirs
+  k8s_v1_job:
+    name: "init-nova-dirs"
+    host: "{{coe_host}}"
+    context: "{{kube_context}}"
+    kubeconfig: "{{config_file}}"
+    namespace: "{{ namespace }}"
+    service_account_name: "{{ service_account_name }}"
+    restart_policy: OnFailure
+    security_context_run_as_user: 0
+    containers:
+      - name: create-nova-dirs
+        image: tripleoupstream/centos-binary-nova-compute
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+        command: ["sh", "-c"]
+        args:
+          - "[ ! -d /var/lib/nova/instances ] && mkdir -p /var/lib/nova/instances;
+            chown nova: /var/lib/nova/instances;"
+        volume_mounts:
+          - name: nova-compute-persistent-storage
+            mountPath: /var/lib/nova
+    volumes:
+      - name: nova-compute-persistent-storage
+        persistentVolumeClaim:
+          claimName: nova-compute-persistent-storage
+
+  #k8s_v1beta1_daemon_set:
+- name: Create compute daemonset 
+  openshift_v1_deployment_config:
+    replicas: 1
+    name: "{{name}}"
+    host: "{{coe_host}}"
+    context: "{{kube_context}}"
+    kubeconfig: "{{config_file}}"
+    namespace: "{{namespace}}"
+    service_account_name: '{{ service_account_name }}'
+    node_selector:
+      compute: "true"
+    spec_template_metadata_labels:
+      app: "{{name}}"
+
+    host_network: true
+    host_pid: true
+    host_ipc: true
+
+    containers:
+      - name: "{{name}}"
+        # Privileged SCC
+        securityContext:
+          privileged: true
+        image: tripleoupstream/centos-binary-nova-compute
+        imagePullPolicy: IfNotPresent
+        env:
+          - name: KOLLA_CONFIG_STRATEGY
+            value: COPY_ALWAYS
+          - name: KOLLA_KUBERNETES
+            value: ""
+        volume_mounts:
+          - name: host-etc-localtime
+            mountPath: /etc/localtime
+            readOnly: true
+          - name: nova-compute-persistent-storage
+            mountPath: /var/lib/nova
+          - name: lib-modules
+            mountPath: /lib/modules
+          - name: var-run
+            mountPath: /var/run
+          - name: dev
+            mountPath: /dev
+          - name: sys-fs-cgroup
+            mountPath: /sys/fs/cgroup
+          - name: kolla-config
+            mountPath: /var/lib/kolla/config_files/
+    volumes:
+      - name: kolla-config
+        config_map:
+          name: "{{name}}"
+      - name: host-etc-localtime
+        hostPath:
+          path: /etc/localtime
+      - name: lib-modules
+        hostPath:
+          path: /lib/modules
+      - name: var-run
+        hostPath:
+          path: /var/run
+      - name: dev
+        hostPath:
+            path: /dev
+      - name: sys-fs-cgroup
+        hostPath:
+          path: /sys/fs/cgroup
+      - name: nova-compute-persistent-storage
+        persistentVolumeClaim:
+          claimName: nova-compute-persistent-storage
+
+    state: present

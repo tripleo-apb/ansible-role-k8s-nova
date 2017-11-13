@@ -1,0 +1,14 @@
+- name: Register Nova in Keystone
+  include_role:
+    name: ansible-role-k8s-tripleo
+    tasks_from: bootstrap-service-endpoints
+  vars:
+    service_name: 'nova-api'
+    service_type: 'compute'
+    service_region: 'RegionOne'
+    service_project: '{{nova_config.keystone_authtoken.project}}'
+    service_password: '{{nova_config.keystone_authtoken.password}}'
+    service_username: '{{nova_config.keystone_authtoken.username}}'
+    service_internal_url: '{{nova_config.keystone_internal_url}}'
+    service_public_url: '{{nova_config.keystone_public_url}}'
+    service_admin_url: '{{nova_config.keystone_admin_url}}'

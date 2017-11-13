@@ -1,0 +1,36 @@
+coe_host: "https://127.0.0.1:8443"
+kube_context: "kubernetes-admin@kubernetes"
+config_file: "~/.kube/config"
+action: provision
+
+name: nova-compute
+namespace: openstack
+service_account_name: openstack-priv
+
+hieradata: {}
+hieradata_file: ''
+
+clouds_config: 'clouds-secret'
+
+nova_config: 
+  DEFAULT:
+    api_bind_address: 0.0.0.0
+  database:
+    connection: "mysql+pymysql://root:weakpassword@mariadb:3306/nova_api"
+
+  # NOTE(flaper87): Auth section for config file
+  keystone_authtoken:
+    auth_uri: 'http://keystone:35357'
+    auth_url: 'http://keystone:5000/v3'
+    password: weakpassword
+    username: 'nova_api'
+    project: 'admin'
+  # NOTE(flaper87): Required for registering the keystone endpoint
+  keystone_default_domain: 'default'
+  keystone_region: 'regionOne'
+  keystone_project: 'admin'
+  keystone_public_url: 'http://nova_api:8774/v2/%(tenant_id)s'
+  keystone_internal_url: 'http://nova_api:8774/v2/%(tenant_id)s'
+  keystone_admin_url: 'http://nova_api:8774/v2/%(tenant_id)s'
+  keystone_user_password: 'weakpassword'
+  keystone_username: 'nova_api'

@@ -1,0 +1,88 @@
+- include: hiera.yml
+
+- name: Generate config files
+  config_template:
+    src: nova.conf.j2
+    dest: /tmp/nova.conf
+    config_overrides: '{{nova_config}}'
+    config_type: ini
+
+- name: Read configs into memory
+  slurp:
+    src: "/tmp/nova.conf"
+  register: "nova_conf"
+
+- name: Create nova-conductor configmaps
+  ignore_errors: yes
+  k8s_v1_config_map:
+    name: "{{name}}"
+    host: "{{coe_host}}"
+    context: "{{kube_context}}"
+    kubeconfig: "{{config_file}}"
+    namespace: "{{namespace}}"
+    state: present
+    debug: yes
+    labels:
+      service: "{{name}}"
+    data:
+      config.json: |
+        {
+            "command": "nova-conductor",
+            "config_files": [
+                {
+                    "source": "/var/lib/kolla/config_files/nova.conf",
+                    "dest": "/etc/nova/nova.conf",
+                    "owner": "nova",
+                    "perm": "0600"
+                },
+                {
+                    "source": "/var/lib/kolla/config_files/policy.json",
+                    "dest": "/etc/nova/policy.json",
+                    "owner": "nova",
+                    "perm": "0600",
+                    "optional": true
+                }
+            ],
+            "permissions": [
+                {
+                    "path": "/var/log/kolla/nova",
+                    "owner": "nova:nova",
+                    "recurse": true
+                }
+            ]
+        }
+
+      nova.conf: |
+        {{nova_conf['content'] | b64decode}}
+
+- name: Create nova deployment
+  k8s_v1beta1_stateful_set:
+    name: "{{name}}"
+    host: "{{coe_host}}"
+    context: "{{kube_context}}"
+    kubeconfig: "{{config_file}}"
+    namespace: "{{namespace}}"
+    service_account_name: '{{ service_account_name }}'
+    replicas: 1
+    node_selector:
+      controller: "true"
+    spec_template_metadata_labels:
+      app: "{{name}}"
+    spec_service_name: "{{name}}"
+    containers:
+      - name: "{{name}}"
+        image: tripleoupstream/centos-binary-nova-conductor
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: KOLLA_CONFIG_STRATEGY
+          value: COPY_ALWAYS
+        - name: KOLLA_KUBERNETES
+          value: ""
+        volume_mounts:
+        - name: kolla-config
+          mountPath: /var/lib/kolla/config_files/
+    volumes:
+      - name: kolla-config
+        config_map:
+          name: "{{name}}"
+    state: present

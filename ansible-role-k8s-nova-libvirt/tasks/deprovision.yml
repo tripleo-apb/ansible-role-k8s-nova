@@ -1,0 +1,9 @@
+- name: Delete "{{name}}" deployment
+  k8s_v1beta1_daemon_set:
+    host: "{{coe_host}}"
+    context: "{{kube_context}}"
+    kubeconfig: "{{config_file}}"
+    name: "{{name}}"
+    namespace: "{{namespace}}"
+    state: absent
+
